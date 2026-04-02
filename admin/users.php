@@ -53,6 +53,7 @@ require_once '../includes/header.php';
     <div class="admin-content">
         <h1>Users</h1>
 
+        <div class="admin-table-wrap">
         <table class="admin-table">
             <thead>
                 <tr>
@@ -88,14 +89,14 @@ require_once '../includes/header.php';
                                             <?= csrf_field() ?>
                                             <input type="hidden" name="user_id" value="<?= $u['id'] ?>">
                                             <input type="hidden" name="action" value="make_admin">
-                                            <button type="submit" class="btn btn-outline btn-sm">Make Admin</button>
+                                            <button type="submit" class="btn btn-outline btn-sm" title="Promote to admin">Promote</button>
                                         </form>
                                     <?php else: ?>
                                         <form method="POST" style="display:inline;">
                                             <?= csrf_field() ?>
                                             <input type="hidden" name="user_id" value="<?= $u['id'] ?>">
                                             <input type="hidden" name="action" value="make_user">
-                                            <button type="submit" class="btn btn-outline btn-sm">Remove Admin</button>
+                                            <button type="submit" class="btn btn-outline btn-sm" title="Revoke admin role">Revoke</button>
                                         </form>
                                     <?php endif; ?>
 
@@ -123,6 +124,7 @@ require_once '../includes/header.php';
                 <?php endforeach; ?>
             </tbody>
         </table>
+        </div>
         <?= pagination_html($pagination, 'users.php') ?>
     </div>
 </div>

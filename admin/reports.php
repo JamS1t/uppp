@@ -60,6 +60,7 @@ require_once '../includes/header.php';
         <?php if (empty($reports)): ?>
             <p style="color: var(--color-text-muted);">No <?= $statusFilter ?> reports.</p>
         <?php else: ?>
+            <div class="admin-table-wrap">
             <table class="admin-table">
                 <thead>
                     <tr>
@@ -117,6 +118,7 @@ require_once '../includes/header.php';
                     <?php endforeach; ?>
                 </tbody>
             </table>
+            </div>
             <?= pagination_html($pagination, 'reports.php?status=' . $statusFilter) ?>
         <?php endif; ?>
     </div>
