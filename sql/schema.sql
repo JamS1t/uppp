@@ -155,7 +155,7 @@ INSERT INTO `categories` (`id`, `name`, `slug`, `description`) VALUES
 
 -- --------------------------------------------------------
 -- Seed data: admin user
--- Default credentials: admin@uppp.local / admin123
+-- Default credentials: admin@uppp.local / password
 -- --------------------------------------------------------
 
 INSERT INTO `users` (`username`, `email`, `password_hash`, `role`) VALUES
