@@ -32,6 +32,7 @@ CREATE TABLE `users` (
   `avatar_path`   varchar(255)         DEFAULT NULL,
   `website_url`   varchar(255)         DEFAULT NULL,
   `created_at`    datetime             NOT NULL DEFAULT current_timestamp(),
+  `updated_at`    datetime             NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
   PRIMARY KEY (`id`),
   UNIQUE KEY `username` (`username`),
   UNIQUE KEY `email` (`email`)
@@ -66,11 +67,16 @@ CREATE TABLE `submissions` (
   `description` text                                  NOT NULL,
   `status`      enum('pending','approved','rejected') NOT NULL DEFAULT 'pending',
   `created_at`  datetime                              NOT NULL DEFAULT current_timestamp(),
+  `updated_at`  datetime                              NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
+  `approved_at` datetime                              DEFAULT NULL,
+  `approved_by` int(11)                               DEFAULT NULL,
   PRIMARY KEY (`id`),
   KEY `user_id` (`user_id`),
   KEY `category_id` (`category_id`),
-  CONSTRAINT `submissions_ibfk_1` FOREIGN KEY (`user_id`)     REFERENCES `users`      (`id`) ON DELETE CASCADE,
-  CONSTRAINT `submissions_ibfk_2` FOREIGN KEY (`category_id`) REFERENCES `categories` (`id`)
+  KEY `approved_by` (`approved_by`),
+  CONSTRAINT `submissions_ibfk_1` FOREIGN KEY (`user_id`)      REFERENCES `users`      (`id`) ON DELETE CASCADE,
+  CONSTRAINT `submissions_ibfk_2` FOREIGN KEY (`category_id`)  REFERENCES `categories` (`id`),
+  CONSTRAINT `submissions_ibfk_3` FOREIGN KEY (`approved_by`)  REFERENCES `users`      (`id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- --------------------------------------------------------
@@ -79,13 +85,11 @@ CREATE TABLE `submissions` (
 
 DROP TABLE IF EXISTS `votes`;
 CREATE TABLE `votes` (
-  `id`            int(11)    NOT NULL AUTO_INCREMENT,
   `user_id`       int(11)    NOT NULL,
   `submission_id` int(11)    NOT NULL,
   `vote_type`     tinyint(4) NOT NULL,
   `created_at`    datetime   NOT NULL DEFAULT current_timestamp(),
-  PRIMARY KEY (`id`),
-  UNIQUE KEY `unique_user_vote` (`user_id`, `submission_id`),
+  PRIMARY KEY (`user_id`, `submission_id`),
   KEY `submission_id` (`submission_id`),
   CONSTRAINT `votes_ibfk_1` FOREIGN KEY (`user_id`)       REFERENCES `users`       (`id`) ON DELETE CASCADE,
   CONSTRAINT `votes_ibfk_2` FOREIGN KEY (`submission_id`) REFERENCES `submissions` (`id`) ON DELETE CASCADE

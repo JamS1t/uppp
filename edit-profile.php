@@ -6,6 +6,7 @@ require_login();
 
 $user = current_user($pdo);
 $errors = [];
+$website_url = '';
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (!verify_csrf()) {
@@ -14,8 +15,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $bio = trim($_POST['bio'] ?? '');
         $website_url = trim($_POST['website_url'] ?? '');
 
-        if ($website_url && !filter_var($website_url, FILTER_VALIDATE_URL)) {
-            $errors[] = 'Please enter a valid website URL.';
+        if ($website_url) {
+            if (!preg_match('#^https?://#i', $website_url)) {
+                $website_url = 'https://' . $website_url;
+            }
+            if (!filter_var($website_url, FILTER_VALIDATE_URL)) {
+                $errors[] = 'Please enter a valid website URL.';
+            }
         }
         if (strlen($website_url) > 255) {
             $errors[] = 'Website URL is too long.';
@@ -126,7 +132,7 @@ require_once 'includes/header.php';
         </div>
         <div class="form-group">
             <label for="website_url">Website URL</label>
-            <input type="url" id="website_url" name="website_url" value="<?= sanitize($user['website_url'] ?? '') ?>" placeholder="https://yoursite.com">
+            <input type="url" id="website_url" name="website_url" value="<?= sanitize($website_url ?: ($user['website_url'] ?? '')) ?>" placeholder="https://yoursite.com">
         </div>
         <button type="submit" class="btn btn-primary btn-full">Save Changes</button>
     </form>
