@@ -17,6 +17,12 @@ if (!is_logged_in()) {
     exit;
 }
 
+if (!verify_csrf()) {
+    http_response_code(403);
+    echo json_encode(['error' => 'Invalid request']);
+    exit;
+}
+
 $submissionId = (int)($_POST['submission_id'] ?? 0);
 $voteType = (int)($_POST['vote_type'] ?? 0);
 
@@ -28,23 +34,28 @@ if ($submissionId <= 0 || !in_array($voteType, [1, -1])) {
 
 $userId = current_user_id();
 
-// Check existing vote
-$stmt = $pdo->prepare('SELECT vote_type FROM votes WHERE user_id = ? AND submission_id = ?');
+// Check existing vote — include soft-deleted rows due to UNIQUE(user_id, submission_id)
+$stmt = $pdo->prepare('SELECT vote_type, deleted_at FROM votes WHERE user_id = ? AND submission_id = ?');
 $stmt->execute([$userId, $submissionId]);
-$existing = $stmt->fetchColumn();
+$existing = $stmt->fetch();
 
 if ($existing === false) {
-    // No vote yet — insert
+    // No row at all — insert new
     $stmt = $pdo->prepare('INSERT INTO votes (user_id, submission_id, vote_type) VALUES (?, ?, ?)');
     $stmt->execute([$userId, $submissionId, $voteType]);
     $userVote = $voteType;
-} elseif ((int)$existing === $voteType) {
-    // Same vote — toggle off
-    $stmt = $pdo->prepare('DELETE FROM votes WHERE user_id = ? AND submission_id = ?');
+} elseif ($existing['deleted_at'] !== null) {
+    // Row exists but soft-deleted — revive
+    $stmt = $pdo->prepare('UPDATE votes SET vote_type = ?, deleted_at = NULL WHERE user_id = ? AND submission_id = ?');
+    $stmt->execute([$voteType, $userId, $submissionId]);
+    $userVote = $voteType;
+} elseif ((int)$existing['vote_type'] === $voteType) {
+    // Active, same vote — toggle off via soft delete
+    $stmt = $pdo->prepare('UPDATE votes SET deleted_at = NOW() WHERE user_id = ? AND submission_id = ?');
     $stmt->execute([$userId, $submissionId]);
     $userVote = 0;
 } else {
-    // Opposite vote — switch
+    // Active, different vote — switch
     $stmt = $pdo->prepare('UPDATE votes SET vote_type = ? WHERE user_id = ? AND submission_id = ?');
     $stmt->execute([$voteType, $userId, $submissionId]);
     $userVote = $voteType;

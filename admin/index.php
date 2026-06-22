@@ -5,10 +5,11 @@ require_once '../includes/functions.php';
 require_once '../includes/auth.php';
 require_admin();
 
-$pendingSubs = $pdo->query("SELECT COUNT(*) FROM submissions WHERE status = 'pending'")->fetchColumn();
-$totalUsers = $pdo->query("SELECT COUNT(*) FROM users")->fetchColumn();
-$totalSubs = $pdo->query("SELECT COUNT(*) FROM submissions")->fetchColumn();
-$pendingReports = $pdo->query("SELECT COUNT(*) FROM reports WHERE status = 'pending'")->fetchColumn();
+$pendingSubs = $pdo->query("SELECT COUNT(*) FROM submissions WHERE status = 'pending' AND deleted_at IS NULL")->fetchColumn();
+$totalUsers = $pdo->query("SELECT COUNT(*) FROM users WHERE deleted_at IS NULL")->fetchColumn();
+$totalSubs = $pdo->query("SELECT COUNT(*) FROM submissions WHERE deleted_at IS NULL")->fetchColumn();
+$pendingReports = $pdo->query("SELECT COUNT(*) FROM reports WHERE status = 'pending' AND deleted_at IS NULL")->fetchColumn();
+$activeWarnings = $pdo->query("SELECT COUNT(*) FROM warnings WHERE deleted_at IS NULL")->fetchColumn();
 
 $pageTitle = 'Admin Dashboard';
 require_once '../includes/header.php';
@@ -34,6 +35,10 @@ require_once '../includes/header.php';
             <div class="stat-card">
                 <div class="stat-number"><?= $pendingReports ?></div>
                 <div class="stat-label">Pending Reports</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-number"><?= $activeWarnings ?></div>
+                <div class="stat-label">Active Warnings</div>
             </div>
         </div>
     </div>

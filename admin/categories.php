@@ -47,12 +47,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && verify_csrf()) {
         $deleteId = (int)($_POST['delete_id'] ?? 0);
         if ($deleteId > 0) {
             // Check if category has submissions (RESTRICT)
-            $count = $pdo->prepare('SELECT COUNT(*) FROM submissions WHERE category_id = ?');
+            $count = $pdo->prepare('SELECT COUNT(*) FROM submissions WHERE category_id = ? AND deleted_at IS NULL');
             $count->execute([$deleteId]);
             if ((int)$count->fetchColumn() > 0) {
                 flash('error', 'Cannot delete category — it has submissions. Reassign them first.');
             } else {
-                $pdo->prepare('DELETE FROM categories WHERE id = ?')->execute([$deleteId]);
+                soft_delete($pdo, 'categories', $deleteId);
                 flash('success', 'Category deleted.');
             }
         }
@@ -61,8 +61,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && verify_csrf()) {
 }
 
 $categories = $pdo->query("
-    SELECT c.*, (SELECT COUNT(*) FROM submissions WHERE category_id = c.id) AS submission_count
-    FROM categories c ORDER BY c.name
+    SELECT c.*, (SELECT COUNT(*) FROM submissions WHERE category_id = c.id AND deleted_at IS NULL) AS submission_count
+    FROM categories c WHERE c.deleted_at IS NULL ORDER BY c.name
 ")->fetchAll();
 
 // Editing?

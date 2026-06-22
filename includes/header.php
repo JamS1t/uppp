@@ -3,6 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="csrf-token" content="<?= sanitize(csrf_token()) ?>">
     <title><?= sanitize($pageTitle ?? 'uppp') ?> — uppp</title>
     <link rel="stylesheet" href="<?= $baseUrl ?? '' ?>assets/css/style.css">
 </head>
@@ -57,3 +58,16 @@
                 <?= sanitize($msg['message']) ?>
             </div>
         <?php endforeach; ?>
+        <?php
+        if (is_logged_in()) {
+            $unack = get_unacknowledged_warnings($pdo, current_user_id());
+            if (!empty($unack)) {
+                foreach ($unack as $w) {
+                    echo '<div class="flash flash-error flash-warning">';
+                    echo '⚠ Warning from moderators: ' . sanitize($w['reason']);
+                    echo '</div>';
+                }
+                acknowledge_warnings($pdo, current_user_id());
+            }
+        }
+        ?>

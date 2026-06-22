@@ -17,19 +17,26 @@ if (!$category) {
 
 $pagination = paginate(
     $pdo,
-    "SELECT COUNT(*) FROM submissions WHERE category_id = ? AND status = 'approved'",
+    "
+    SELECT COUNT(*) FROM submissions s
+    JOIN users u ON s.user_id = u.id
+    JOIN categories c ON s.category_id = c.id
+    WHERE s.category_id = ? AND s.status = 'approved'
+      AND s.deleted_at IS NULL AND u.deleted_at IS NULL AND c.deleted_at IS NULL
+    ",
     [$category['id']]
 );
 
 $stmt = $pdo->prepare("
     SELECT s.*, u.username, c.name AS category_name, c.slug AS category_slug,
            COALESCE(SUM(v.vote_type), 0) AS net_votes,
-           (SELECT COUNT(*) FROM comments cm WHERE cm.submission_id = s.id) AS comment_count
+           (SELECT COUNT(*) FROM comments cm WHERE cm.submission_id = s.id AND cm.deleted_at IS NULL) AS comment_count
     FROM submissions s
     JOIN users u ON s.user_id = u.id
     JOIN categories c ON s.category_id = c.id
-    LEFT JOIN votes v ON v.submission_id = s.id
+    LEFT JOIN votes v ON v.submission_id = s.id AND v.deleted_at IS NULL
     WHERE s.category_id = ? AND s.status = 'approved'
+      AND s.deleted_at IS NULL AND u.deleted_at IS NULL AND c.deleted_at IS NULL
     GROUP BY s.id
     ORDER BY s.created_at DESC
     LIMIT {$pagination['limit']} OFFSET {$pagination['offset']}

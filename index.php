@@ -10,12 +10,13 @@ $topSql = "
     SELECT s.*, u.username, c.name AS category_name, c.slug AS category_slug,
            COALESCE(SUM(v.vote_type), 0) + GREATEST(0, 7 - DATEDIFF(NOW(), s.created_at)) AS rank_score,
            COALESCE(SUM(v.vote_type), 0) AS net_votes,
-           (SELECT COUNT(*) FROM comments cm WHERE cm.submission_id = s.id) AS comment_count
+           (SELECT COUNT(*) FROM comments cm WHERE cm.submission_id = s.id AND cm.deleted_at IS NULL) AS comment_count
     FROM submissions s
     JOIN users u ON s.user_id = u.id
     JOIN categories c ON s.category_id = c.id
-    LEFT JOIN votes v ON v.submission_id = s.id
+    LEFT JOIN votes v ON v.submission_id = s.id AND v.deleted_at IS NULL
     WHERE s.status = 'approved' AND s.created_at >= NOW() - INTERVAL 7 DAY
+      AND s.deleted_at IS NULL AND u.deleted_at IS NULL AND c.deleted_at IS NULL
     GROUP BY s.id
     ORDER BY rank_score DESC
     LIMIT 5
@@ -24,16 +25,23 @@ $topStmt = $pdo->query($topSql);
 $topSubmissions = $topStmt->fetchAll();
 
 // Recent approved submissions, paginated
-$pagination = paginate($pdo, "SELECT COUNT(*) FROM submissions WHERE status = 'approved'", []);
+$pagination = paginate($pdo, "
+    SELECT COUNT(*) FROM submissions s
+    JOIN users u ON s.user_id = u.id
+    JOIN categories c ON s.category_id = c.id
+    WHERE s.status = 'approved'
+      AND s.deleted_at IS NULL AND u.deleted_at IS NULL AND c.deleted_at IS NULL
+", []);
 $recentSql = "
     SELECT s.*, u.username, c.name AS category_name, c.slug AS category_slug,
            COALESCE(SUM(v.vote_type), 0) AS net_votes,
-           (SELECT COUNT(*) FROM comments cm WHERE cm.submission_id = s.id) AS comment_count
+           (SELECT COUNT(*) FROM comments cm WHERE cm.submission_id = s.id AND cm.deleted_at IS NULL) AS comment_count
     FROM submissions s
     JOIN users u ON s.user_id = u.id
     JOIN categories c ON s.category_id = c.id
-    LEFT JOIN votes v ON v.submission_id = s.id
+    LEFT JOIN votes v ON v.submission_id = s.id AND v.deleted_at IS NULL
     WHERE s.status = 'approved'
+      AND s.deleted_at IS NULL AND u.deleted_at IS NULL AND c.deleted_at IS NULL
     GROUP BY s.id
     ORDER BY s.created_at DESC
     LIMIT {$pagination['limit']} OFFSET {$pagination['offset']}

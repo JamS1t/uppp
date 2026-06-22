@@ -8,6 +8,10 @@ document.addEventListener('DOMContentLoaded', function () {
             formData.append('submission_id', submissionId);
             formData.append('vote_type', voteType);
 
+            var tokenMeta = document.querySelector('meta[name="csrf-token"]');
+            var token = tokenMeta ? tokenMeta.getAttribute('content') : '';
+            formData.append('csrf_token', token);
+
             fetch('vote.php', {
                 method: 'POST',
                 body: formData,
@@ -15,6 +19,10 @@ document.addEventListener('DOMContentLoaded', function () {
                 .then(function (res) {
                     if (res.status === 401) {
                         window.location.href = 'login.php';
+                        return;
+                    }
+                    if (res.status === 403) {
+                        console.warn('Vote rejected: invalid request');
                         return;
                     }
                     return res.json();

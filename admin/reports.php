@@ -23,7 +23,7 @@ if (!in_array($statusFilter, ['pending', 'resolved', 'dismissed'])) $statusFilte
 
 $pagination = paginate(
     $pdo,
-    'SELECT COUNT(*) FROM reports WHERE status = ?',
+    'SELECT COUNT(*) FROM reports WHERE status = ? AND deleted_at IS NULL',
     [$statusFilter]
 );
 
@@ -33,9 +33,9 @@ $stmt = $pdo->prepare("
            cm.body AS comment_body, cm.submission_id AS comment_sub_id
     FROM reports r
     JOIN users ru ON r.user_id = ru.id
-    LEFT JOIN submissions s ON r.submission_id = s.id
-    LEFT JOIN comments cm ON r.comment_id = cm.id
-    WHERE r.status = ?
+    LEFT JOIN submissions s ON r.submission_id = s.id AND s.deleted_at IS NULL
+    LEFT JOIN comments cm ON r.comment_id = cm.id AND cm.deleted_at IS NULL
+    WHERE r.status = ? AND r.deleted_at IS NULL
     ORDER BY r.created_at DESC
     LIMIT {$pagination['limit']} OFFSET {$pagination['offset']}
 ");

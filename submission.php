@@ -12,7 +12,7 @@ $stmt = $pdo->prepare("
     FROM submissions s
     JOIN users u ON s.user_id = u.id
     JOIN categories c ON s.category_id = c.id
-    WHERE s.id = ?
+    WHERE s.id = ? AND s.deleted_at IS NULL AND u.deleted_at IS NULL AND c.deleted_at IS NULL
 ");
 $stmt->execute([$id]);
 $sub = $stmt->fetch();
@@ -50,12 +50,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['comment_body'])) {
 if (isset($_GET['delete_comment'])) {
     require_login();
     $commentId = (int)$_GET['delete_comment'];
-    $stmt = $pdo->prepare('SELECT * FROM comments WHERE id = ?');
+    $stmt = $pdo->prepare('SELECT * FROM comments WHERE id = ? AND deleted_at IS NULL');
     $stmt->execute([$commentId]);
     $comment = $stmt->fetch();
     if ($comment && (current_user_id() === $comment['user_id'] || is_admin())) {
-        $stmt = $pdo->prepare('DELETE FROM comments WHERE id = ?');
-        $stmt->execute([$commentId]);
+        soft_delete($pdo, 'comments', $commentId);
         flash('success', 'Comment deleted.');
     }
     redirect('submission.php?id=' . $id);
@@ -69,7 +68,7 @@ $commentStmt = $pdo->prepare("
     SELECT cm.*, u.username
     FROM comments cm
     JOIN users u ON cm.user_id = u.id
-    WHERE cm.submission_id = ?
+    WHERE cm.submission_id = ? AND cm.deleted_at IS NULL AND u.deleted_at IS NULL
     ORDER BY cm.created_at ASC
 ");
 $commentStmt->execute([$id]);

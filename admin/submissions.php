@@ -14,6 +14,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && verify_csrf()) {
         $stmt = $pdo->prepare('UPDATE submissions SET status = ? WHERE id = ?');
         $stmt->execute([$action, $subId]);
         flash('success', 'Submission ' . $action . '.');
+    } elseif ($subId > 0 && $action === 'delete') {
+        soft_delete($pdo, 'submissions', $subId);
+        flash('success', 'Submission deleted.');
     }
     redirect('submissions.php?status=' . ($_GET['status'] ?? 'pending'));
 }
@@ -23,7 +26,7 @@ if (!in_array($statusFilter, ['pending', 'approved', 'rejected'])) $statusFilter
 
 $pagination = paginate(
     $pdo,
-    'SELECT COUNT(*) FROM submissions WHERE status = ?',
+    'SELECT COUNT(*) FROM submissions WHERE status = ? AND deleted_at IS NULL',
     [$statusFilter]
 );
 
@@ -32,7 +35,7 @@ $stmt = $pdo->prepare("
     FROM submissions s
     JOIN users u ON s.user_id = u.id
     JOIN categories c ON s.category_id = c.id
-    WHERE s.status = ?
+    WHERE s.status = ? AND s.deleted_at IS NULL
     ORDER BY s.created_at DESC
     LIMIT {$pagination['limit']} OFFSET {$pagination['offset']}
 ");
@@ -95,6 +98,12 @@ require_once '../includes/header.php';
                                             <button type="submit" class="btn btn-danger btn-sm">Reject</button>
                                         </form>
                                     <?php endif; ?>
+                                    <form method="POST" style="display:inline;" onsubmit="return confirm('Delete this submission?')">
+                                        <?= csrf_field() ?>
+                                        <input type="hidden" name="submission_id" value="<?= $sub['id'] ?>">
+                                        <input type="hidden" name="action" value="delete">
+                                        <button type="submit" class="btn btn-danger btn-sm">Delete</button>
+                                    </form>
                                 </div>
                             </td>
                         </tr>

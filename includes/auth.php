@@ -1,7 +1,21 @@
 <?php
+// --- Security response headers (sent on every page; before any output) ----
+if (!headers_sent()) {
+    header('X-Content-Type-Options: nosniff');
+    header('X-Frame-Options: SAMEORIGIN');
+    header('Referrer-Policy: strict-origin-when-cross-origin');
+    header('X-XSS-Protection: 0');
+}
+
+// Send the secure cookie flag automatically when served over HTTPS so the
+// session cookie is not leaked over plain HTTP in production.
+$secureCookie = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off')
+    || (($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '') === 'https');
+
 session_set_cookie_params([
     'httponly' => true,
     'samesite' => 'Lax',
+    'secure'   => $secureCookie,
 ]);
 session_start();
 
@@ -19,13 +33,19 @@ function current_user_id(): ?int {
 
 function current_user(PDO $pdo): ?array {
     if (!is_logged_in()) return null;
-    $stmt = $pdo->prepare('SELECT * FROM users WHERE id = ?');
+    $stmt = $pdo->prepare('SELECT * FROM users WHERE id = ? AND deleted_at IS NULL');
     $stmt->execute([current_user_id()]);
-    return $stmt->fetch() ?: null;
+    $user = $stmt->fetch();
+    // Session points at an account that no longer exists / was deleted.
+    if (!$user) {
+        logout_user();
+        return null;
+    }
+    return $user;
 }
 
 function login_user(PDO $pdo, string $email, string $password): string|true {
-    $stmt = $pdo->prepare('SELECT * FROM users WHERE email = ?');
+    $stmt = $pdo->prepare('SELECT * FROM users WHERE email = ? AND deleted_at IS NULL');
     $stmt->execute([$email]);
     $user = $stmt->fetch();
 
