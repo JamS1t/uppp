@@ -28,7 +28,11 @@ No database schema changes. Everything relies on existing columns
 
 ## Part A — View & restore deleted items (per-page)
 
-Applies to all four lists: **Users, Submissions, Categories, Reports.**
+Applies to five lists: **Users, Submissions, Categories, Reports**, and a
+**new Comments** admin page. Comments are soft-deletable (the
+`migration_soft_delete_warnings.sql` migration adds `deleted_at` to `comments`;
+`comments` is already in `SOFT_DELETE_TABLES`), but there is no admin surface for
+them today, so one is added.
 
 ### Shared helper (`includes/functions.php`)
 
@@ -88,6 +92,36 @@ function deleted_count(PDO $pdo, string $table): int {
   - When active: list `WHERE r.deleted_at IS NOT NULL`; action is **Restore**.
 - `$statusFilter` whitelist becomes
   `['pending','resolved','dismissed','deleted']`.
+
+### Comments — NEW page (`admin/comments.php`)
+
+A new admin list page, mirroring the structure of `submissions.php`.
+
+- **Sidebar** (`admin/_sidebar.php`): add a `Comments` link between Users and
+  Categories (or after Reports — placement: after Users, grouping content
+  moderation together: Submissions, Comments, then Users... keep simple →
+  add after `submissions.php`). Add the `active` highlight for `comments.php`.
+- **Active / Deleted toggle** via `.filter-tabs` (`?view=active|deleted`,
+  default `active`).
+- **List query** joins author and submission for context:
+  ```sql
+  SELECT cm.*, u.username, s.title AS submission_title
+  FROM comments cm
+  JOIN users u ON cm.user_id = u.id
+  JOIN submissions s ON cm.submission_id = s.id
+  WHERE cm.deleted_at IS NULL   -- or IS NOT NULL for the Deleted view
+  ORDER BY cm.created_at DESC
+  LIMIT ... OFFSET ...
+  ```
+  Use a `paginate()` count query with the matching WHERE.
+- **Columns:** Body (excerpt via `mb_substr`, linked to the parent submission
+  `../submission.php?id=<submission_id>`), Author (link to profile), On
+  (submission title link), Date (`time_ago`), Actions.
+- **Actions:**
+  - Active view → **Delete** (`action=delete` → `soft_delete($pdo,'comments',$id)`,
+    confirm).
+  - Deleted view → **Restore** (`action=restore` → `restore_row($pdo,'comments',$id)`).
+- POST handler guarded by `verify_csrf()`, `(int)` cast on `comment_id`.
 
 ## Part B — Users page UI overhaul (`admin/users.php` + CSS)
 
@@ -178,16 +212,21 @@ Replace the hover-only `title` tooltip with a native `<details>`:
 
 ## Testing (manual, XAMPP)
 
-1. Soft-delete a user/submission/category/report → it disappears from the
+1. Soft-delete a user/submission/category/report/comment → it disappears from the
    default list and appears under that list's Deleted tab with a Restore button.
+   For comments: delete one from the new admin Comments page, confirm it leaves
+   the Active view and the public submission page, and shows under Deleted.
 2. Restore → it returns to the active list.
 3. Deleted counts on tabs match.
 4. Users search by username/email, filter by role and status — results and
    pagination links preserve filters.
 5. Manage menu: promote/revoke, warn (reason < 5 chars rejected), ban/unban,
    delete all still work and remain CSRF-guarded.
-6. Warnings disclosure shows reasons/issuer/time; N=0 shows plain badge.
-7. Own-row still shows "(You)" with no destructive actions.
+6. Comments admin page: sidebar link works, active list shows comments with
+   author/submission context, Delete moves a comment to Deleted, Restore returns
+   it, pagination works.
+7. Warnings disclosure shows reasons/issuer/time; N=0 shows plain badge.
+8. Own-row still shows "(You)" with no destructive actions.
 
 ## Out of scope (YAGNI)
 
