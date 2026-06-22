@@ -47,20 +47,72 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && verify_csrf()) {
                 break;
         }
     }
-    redirect('users.php');
+    // Preserve current filters on redirect.
+    $qs = http_build_query(array_filter([
+        'view'   => $_GET['view']   ?? null,
+        'q'      => $_GET['q']      ?? null,
+        'role'   => $_GET['role']   ?? null,
+        'status' => $_GET['status'] ?? null,
+    ], fn($v) => $v !== null && $v !== ''));
+    redirect('users.php' . ($qs ? '?' . $qs : ''));
 }
 
-$pagination = paginate($pdo, 'SELECT COUNT(*) FROM users', []);
+// ----- Filters -----
+$view = $_GET['view'] ?? 'active';
+if (!in_array($view, ['active', 'deleted'])) $view = 'active';
+$viewingDeleted = $view === 'deleted';
+
+$q = trim($_GET['q'] ?? '');
+$roleFilter = $_GET['role'] ?? 'all';
+if (!in_array($roleFilter, ['all', 'admin', 'user'])) $roleFilter = 'all';
+$statusFilter = $_GET['status'] ?? 'all';
+if (!in_array($statusFilter, ['all', 'active', 'banned'])) $statusFilter = 'all';
+
+$where = [];
+$params = [];
+
+$where[] = $viewingDeleted ? 'u.deleted_at IS NOT NULL' : 'u.deleted_at IS NULL';
+
+if ($q !== '') {
+    $like = '%' . escape_like($q) . '%';
+    $where[] = '(u.username LIKE ? OR u.email LIKE ?)';
+    $params[] = $like;
+    $params[] = $like;
+}
+if ($roleFilter !== 'all') {
+    $where[] = 'u.role = ?';
+    $params[] = $roleFilter;
+}
+// Status filter only applies in the Active view (Deleted view has its own meaning).
+if (!$viewingDeleted && $statusFilter !== 'all') {
+    $where[] = 'u.is_banned = ?';
+    $params[] = $statusFilter === 'banned' ? 1 : 0;
+}
+
+$whereSql = 'WHERE ' . implode(' AND ', $where);
+
+$pagination = paginate($pdo, "SELECT COUNT(*) FROM users u $whereSql", $params);
+
 $stmt = $pdo->prepare("
     SELECT u.*,
            (SELECT COUNT(*) FROM submissions WHERE user_id = u.id) AS submission_count,
            (SELECT COUNT(*) FROM warnings w WHERE w.user_id = u.id AND w.deleted_at IS NULL) AS warning_count
     FROM users u
-    ORDER BY u.created_at DESC
+    $whereSql
+    ORDER BY " . ($viewingDeleted ? 'u.deleted_at' : 'u.created_at') . " DESC
     LIMIT {$pagination['limit']} OFFSET {$pagination['offset']}
 ");
-$stmt->execute();
+$stmt->execute($params);
 $users = $stmt->fetchAll();
+$deletedUsersCount = deleted_count($pdo, 'users');
+
+// Query string for pagination links (keeps filters).
+$filterQs = http_build_query(array_filter([
+    'view'   => $viewingDeleted ? 'deleted' : null,
+    'q'      => $q !== '' ? $q : null,
+    'role'   => $roleFilter !== 'all' ? $roleFilter : null,
+    'status' => $statusFilter !== 'all' ? $statusFilter : null,
+]));
 
 $pageTitle = 'Manage Users';
 require_once '../includes/header.php';
@@ -71,25 +123,61 @@ require_once '../includes/header.php';
     <div class="admin-content">
         <h1>Users</h1>
 
+        <div class="filter-tabs">
+            <a href="?view=active" class="<?= !$viewingDeleted ? 'active' : '' ?>">Active</a>
+            <a href="?view=deleted" class="<?= $viewingDeleted ? 'active' : '' ?>">Deleted<?= $deletedUsersCount > 0 ? ' (' . $deletedUsersCount . ')' : '' ?></a>
+        </div>
+
+        <form method="GET" class="users-toolbar">
+            <input type="hidden" name="view" value="<?= $viewingDeleted ? 'deleted' : 'active' ?>">
+            <input type="text" name="q" value="<?= sanitize($q) ?>" placeholder="Search username or email…" class="users-search">
+            <select name="role">
+                <option value="all" <?= $roleFilter === 'all' ? 'selected' : '' ?>>All roles</option>
+                <option value="admin" <?= $roleFilter === 'admin' ? 'selected' : '' ?>>Admin</option>
+                <option value="user" <?= $roleFilter === 'user' ? 'selected' : '' ?>>User</option>
+            </select>
+            <?php if (!$viewingDeleted): ?>
+            <select name="status">
+                <option value="all" <?= $statusFilter === 'all' ? 'selected' : '' ?>>All statuses</option>
+                <option value="active" <?= $statusFilter === 'active' ? 'selected' : '' ?>>Active</option>
+                <option value="banned" <?= $statusFilter === 'banned' ? 'selected' : '' ?>>Banned</option>
+            </select>
+            <?php endif; ?>
+            <button type="submit" class="btn btn-primary btn-sm">Filter</button>
+            <?php if ($q !== '' || $roleFilter !== 'all' || $statusFilter !== 'all'): ?>
+                <a href="?view=<?= $viewingDeleted ? 'deleted' : 'active' ?>" class="btn btn-outline btn-sm">Clear</a>
+            <?php endif; ?>
+        </form>
+
+        <?php if (empty($users)): ?>
+            <p style="color: var(--color-text-muted);">No users match.</p>
+        <?php else: ?>
         <div class="admin-table-wrap">
         <table class="admin-table">
             <thead>
                 <tr>
-                    <th>Username</th>
-                    <th>Email</th>
+                    <th>User</th>
                     <th>Role</th>
                     <th>Status</th>
                     <th>Warnings</th>
-                    <th>Submissions</th>
-                    <th>Joined</th>
+                    <th>Subs</th>
+                    <th><?= $viewingDeleted ? 'Deleted' : 'Joined' ?></th>
                     <th>Actions</th>
                 </tr>
             </thead>
             <tbody>
                 <?php foreach ($users as $u): ?>
+                    <?php $wcount = (int)$u['warning_count']; ?>
                     <tr>
-                        <td><a href="../profile.php?id=<?= $u['id'] ?>"><?= sanitize($u['username']) ?></a></td>
-                        <td><?= sanitize($u['email']) ?></td>
+                        <td>
+                            <div class="user-cell">
+                                <span class="user-avatar-sm"><?= sanitize(initials($u['username'])) ?></span>
+                                <div class="user-cell-text">
+                                    <a href="../profile.php?id=<?= $u['id'] ?>"><?= sanitize($u['username']) ?></a>
+                                    <span class="user-cell-email"><?= sanitize($u['email']) ?></span>
+                                </div>
+                            </div>
+                        </td>
                         <td><span class="badge <?= $u['role'] === 'admin' ? 'badge-primary' : '' ?>"><?= ucfirst($u['role']) ?></span></td>
                         <td>
                             <?php if (!empty($u['deleted_at'])): ?>
@@ -101,81 +189,86 @@ require_once '../includes/header.php';
                             <?php endif; ?>
                         </td>
                         <td>
-                            <?php
-                            $wcount = (int)$u['warning_count'];
-                            $wtitle = '';
-                            if ($wcount > 0) {
-                                $reasons = array_map(function ($w) { return $w['reason']; }, get_warnings($pdo, $u['id']));
-                                $wtitle = implode("\n", $reasons);
-                            }
-                            ?>
-                            <span class="badge <?= $wcount > 0 ? 'badge-rejected' : '' ?>" title="<?= sanitize($wtitle) ?>">Warnings: <?= $wcount ?></span>
+                            <?php if ($wcount > 0): ?>
+                                <details class="warnings-cell">
+                                    <summary><span class="badge badge-rejected">Warnings: <?= $wcount ?> ▾</span></summary>
+                                    <ul class="warning-list">
+                                        <?php foreach (get_warnings($pdo, $u['id']) as $w): ?>
+                                            <li>
+                                                <span class="warning-reason"><?= sanitize($w['reason']) ?></span>
+                                                <span class="warning-meta">by <?= sanitize($w['issued_by_name'] ?? 'system') ?> · <?= time_ago($w['created_at']) ?></span>
+                                            </li>
+                                        <?php endforeach; ?>
+                                    </ul>
+                                </details>
+                            <?php else: ?>
+                                <span class="badge">0</span>
+                            <?php endif; ?>
                         </td>
                         <td><?= $u['submission_count'] ?></td>
-                        <td><?= time_ago($u['created_at']) ?></td>
+                        <td><?= time_ago($viewingDeleted ? $u['deleted_at'] : $u['created_at']) ?></td>
                         <td>
-                            <?php if ($u['id'] !== current_user_id()): ?>
-                                <?php if (!empty($u['deleted_at'])): ?>
-                                    <div class="admin-actions">
-                                        <form method="POST" style="display:inline;">
+                            <?php if ($u['id'] === current_user_id()): ?>
+                                <span style="color: var(--color-text-muted);">(You)</span>
+                            <?php elseif ($viewingDeleted): ?>
+                                <form method="POST" style="display:inline;">
+                                    <?= csrf_field() ?>
+                                    <input type="hidden" name="user_id" value="<?= $u['id'] ?>">
+                                    <input type="hidden" name="action" value="restore">
+                                    <button type="submit" class="btn btn-success btn-sm">Restore</button>
+                                </form>
+                            <?php else: ?>
+                                <details class="row-menu">
+                                    <summary class="btn btn-outline btn-sm">Manage ▾</summary>
+                                    <div class="row-menu-panel">
+                                        <?php if ($u['role'] === 'user'): ?>
+                                            <form method="POST">
+                                                <?= csrf_field() ?>
+                                                <input type="hidden" name="user_id" value="<?= $u['id'] ?>">
+                                                <input type="hidden" name="action" value="make_admin">
+                                                <button type="submit" class="row-menu-item">Promote to admin</button>
+                                            </form>
+                                        <?php else: ?>
+                                            <form method="POST">
+                                                <?= csrf_field() ?>
+                                                <input type="hidden" name="user_id" value="<?= $u['id'] ?>">
+                                                <input type="hidden" name="action" value="make_user">
+                                                <button type="submit" class="row-menu-item">Revoke admin</button>
+                                            </form>
+                                        <?php endif; ?>
+
+                                        <form method="POST" class="row-menu-warn">
                                             <?= csrf_field() ?>
                                             <input type="hidden" name="user_id" value="<?= $u['id'] ?>">
-                                            <input type="hidden" name="action" value="restore">
-                                            <button type="submit" class="btn btn-success btn-sm">Restore</button>
+                                            <input type="hidden" name="action" value="warn">
+                                            <textarea name="warn_reason" rows="2" placeholder="Warning reason (min 5 chars)…"></textarea>
+                                            <button type="submit" class="btn btn-outline btn-sm">Issue warning</button>
+                                        </form>
+
+                                        <?php if ($u['is_banned']): ?>
+                                            <form method="POST">
+                                                <?= csrf_field() ?>
+                                                <input type="hidden" name="user_id" value="<?= $u['id'] ?>">
+                                                <input type="hidden" name="action" value="unban">
+                                                <button type="submit" class="row-menu-item row-menu-item-success">Unban user</button>
+                                            </form>
+                                        <?php else: ?>
+                                            <form method="POST" onsubmit="return confirm('This user has <?= $wcount ?> warning(s). Consider warning before banning. Ban this user?')">
+                                                <?= csrf_field() ?>
+                                                <input type="hidden" name="user_id" value="<?= $u['id'] ?>">
+                                                <input type="hidden" name="action" value="ban">
+                                                <button type="submit" class="row-menu-item row-menu-item-danger">Ban user</button>
+                                            </form>
+                                        <?php endif; ?>
+
+                                        <form method="POST" onsubmit="return confirm('Delete this user (soft)?')">
+                                            <?= csrf_field() ?>
+                                            <input type="hidden" name="user_id" value="<?= $u['id'] ?>">
+                                            <input type="hidden" name="action" value="delete">
+                                            <button type="submit" class="row-menu-item row-menu-item-danger">Delete user</button>
                                         </form>
                                     </div>
-                                <?php else: ?>
-                                <div class="admin-actions">
-                                    <?php if ($u['role'] === 'user'): ?>
-                                        <form method="POST" style="display:inline;">
-                                            <?= csrf_field() ?>
-                                            <input type="hidden" name="user_id" value="<?= $u['id'] ?>">
-                                            <input type="hidden" name="action" value="make_admin">
-                                            <button type="submit" class="btn btn-outline btn-sm" title="Promote to admin">Promote</button>
-                                        </form>
-                                    <?php else: ?>
-                                        <form method="POST" style="display:inline;">
-                                            <?= csrf_field() ?>
-                                            <input type="hidden" name="user_id" value="<?= $u['id'] ?>">
-                                            <input type="hidden" name="action" value="make_user">
-                                            <button type="submit" class="btn btn-outline btn-sm" title="Revoke admin role">Revoke</button>
-                                        </form>
-                                    <?php endif; ?>
-
-                                    <form method="POST" style="display:inline;">
-                                        <?= csrf_field() ?>
-                                        <input type="hidden" name="user_id" value="<?= $u['id'] ?>">
-                                        <input type="hidden" name="action" value="warn">
-                                        <input type="text" name="warn_reason" placeholder="Warning reason" class="input-sm" style="width:140px;">
-                                        <button type="submit" class="btn btn-outline btn-sm" title="Warn this user">Warn</button>
-                                    </form>
-
-                                    <?php if ($u['is_banned']): ?>
-                                        <form method="POST" style="display:inline;">
-                                            <?= csrf_field() ?>
-                                            <input type="hidden" name="user_id" value="<?= $u['id'] ?>">
-                                            <input type="hidden" name="action" value="unban">
-                                            <button type="submit" class="btn btn-success btn-sm">Unban</button>
-                                        </form>
-                                    <?php else: ?>
-                                        <form method="POST" style="display:inline;" onsubmit="return confirm('This user has <?= (int)$u['warning_count'] ?> warning(s). Consider warning before banning. Ban this user?')">
-                                            <?= csrf_field() ?>
-                                            <input type="hidden" name="user_id" value="<?= $u['id'] ?>">
-                                            <input type="hidden" name="action" value="ban">
-                                            <button type="submit" class="btn btn-danger btn-sm">Ban</button>
-                                        </form>
-                                    <?php endif; ?>
-
-                                    <form method="POST" style="display:inline;" onsubmit="return confirm('Delete this user (soft)?')">
-                                        <?= csrf_field() ?>
-                                        <input type="hidden" name="user_id" value="<?= $u['id'] ?>">
-                                        <input type="hidden" name="action" value="delete">
-                                        <button type="submit" class="btn btn-danger btn-sm">Delete</button>
-                                    </form>
-                                </div>
-                                <?php endif; ?>
-                            <?php else: ?>
-                                <span style="color: var(--color-text-muted);">(You)</span>
+                                </details>
                             <?php endif; ?>
                         </td>
                     </tr>
@@ -183,7 +276,8 @@ require_once '../includes/header.php';
             </tbody>
         </table>
         </div>
-        <?= pagination_html($pagination, 'users.php') ?>
+        <?= pagination_html($pagination, 'users.php' . ($filterQs ? '?' . $filterQs : '')) ?>
+        <?php endif; ?>
     </div>
 </div>
 

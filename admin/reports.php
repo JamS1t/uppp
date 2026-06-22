@@ -14,17 +14,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && verify_csrf()) {
         $stmt = $pdo->prepare('UPDATE reports SET status = ? WHERE id = ?');
         $stmt->execute([$action, $reportId]);
         flash('success', 'Report ' . $action . '.');
+    } elseif ($reportId > 0 && $action === 'delete') {
+        soft_delete($pdo, 'reports', $reportId);
+        flash('success', 'Report deleted.');
+    } elseif ($reportId > 0 && $action === 'restore') {
+        restore_row($pdo, 'reports', $reportId);
+        flash('success', 'Report restored.');
     }
     redirect('reports.php?status=' . ($_GET['status'] ?? 'pending'));
 }
 
 $statusFilter = $_GET['status'] ?? 'pending';
-if (!in_array($statusFilter, ['pending', 'resolved', 'dismissed'])) $statusFilter = 'pending';
+if (!in_array($statusFilter, ['pending', 'resolved', 'dismissed', 'deleted'])) $statusFilter = 'pending';
+$viewingDeleted = $statusFilter === 'deleted';
+
+$reportWhere = $viewingDeleted ? 'r.deleted_at IS NOT NULL' : 'r.status = ? AND r.deleted_at IS NULL';
+$reportParams = $viewingDeleted ? [] : [$statusFilter];
 
 $pagination = paginate(
     $pdo,
-    'SELECT COUNT(*) FROM reports WHERE status = ? AND deleted_at IS NULL',
-    [$statusFilter]
+    "SELECT COUNT(*) FROM reports r WHERE $reportWhere",
+    $reportParams
 );
 
 $stmt = $pdo->prepare("
@@ -35,12 +45,13 @@ $stmt = $pdo->prepare("
     JOIN users ru ON r.user_id = ru.id
     LEFT JOIN submissions s ON r.submission_id = s.id AND s.deleted_at IS NULL
     LEFT JOIN comments cm ON r.comment_id = cm.id AND cm.deleted_at IS NULL
-    WHERE r.status = ? AND r.deleted_at IS NULL
-    ORDER BY r.created_at DESC
+    WHERE $reportWhere
+    ORDER BY " . ($viewingDeleted ? 'r.deleted_at' : 'r.created_at') . " DESC
     LIMIT {$pagination['limit']} OFFSET {$pagination['offset']}
 ");
-$stmt->execute([$statusFilter]);
+$stmt->execute($reportParams);
 $reports = $stmt->fetchAll();
+$deletedReportsCount = deleted_count($pdo, 'reports');
 
 $pageTitle = 'Manage Reports';
 require_once '../includes/header.php';
@@ -55,6 +66,7 @@ require_once '../includes/header.php';
             <a href="?status=pending" class="<?= $statusFilter === 'pending' ? 'active' : '' ?>">Pending</a>
             <a href="?status=resolved" class="<?= $statusFilter === 'resolved' ? 'active' : '' ?>">Resolved</a>
             <a href="?status=dismissed" class="<?= $statusFilter === 'dismissed' ? 'active' : '' ?>">Dismissed</a>
+            <a href="?status=deleted" class="<?= $viewingDeleted ? 'active' : '' ?>">Deleted<?= $deletedReportsCount > 0 ? ' (' . $deletedReportsCount . ')' : '' ?></a>
         </div>
 
         <?php if (empty($reports)): ?>
@@ -93,26 +105,41 @@ require_once '../includes/header.php';
                             </td>
                             <td><a href="../profile.php?id=<?= $r['user_id'] ?>"><?= sanitize($r['reporter_name']) ?></a></td>
                             <td><?= sanitize(mb_substr($r['reason'], 0, 80)) ?></td>
-                            <td><?= time_ago($r['created_at']) ?></td>
+                            <td><?= $viewingDeleted ? 'deleted ' . time_ago($r['deleted_at']) : time_ago($r['created_at']) ?></td>
                             <td>
-                                <?php if ($r['status'] === 'pending'): ?>
-                                    <div class="admin-actions">
+                                <div class="admin-actions">
+                                    <?php if ($viewingDeleted): ?>
                                         <form method="POST" style="display:inline;">
                                             <?= csrf_field() ?>
                                             <input type="hidden" name="report_id" value="<?= $r['id'] ?>">
-                                            <input type="hidden" name="action" value="resolved">
-                                            <button type="submit" class="btn btn-success btn-sm">Resolve</button>
+                                            <input type="hidden" name="action" value="restore">
+                                            <button type="submit" class="btn btn-success btn-sm">Restore</button>
                                         </form>
-                                        <form method="POST" style="display:inline;">
+                                    <?php else: ?>
+                                        <?php if ($r['status'] === 'pending'): ?>
+                                            <form method="POST" style="display:inline;">
+                                                <?= csrf_field() ?>
+                                                <input type="hidden" name="report_id" value="<?= $r['id'] ?>">
+                                                <input type="hidden" name="action" value="resolved">
+                                                <button type="submit" class="btn btn-success btn-sm">Resolve</button>
+                                            </form>
+                                            <form method="POST" style="display:inline;">
+                                                <?= csrf_field() ?>
+                                                <input type="hidden" name="report_id" value="<?= $r['id'] ?>">
+                                                <input type="hidden" name="action" value="dismissed">
+                                                <button type="submit" class="btn btn-outline btn-sm">Dismiss</button>
+                                            </form>
+                                        <?php else: ?>
+                                            <span class="badge"><?= ucfirst($r['status']) ?></span>
+                                        <?php endif; ?>
+                                        <form method="POST" style="display:inline;" onsubmit="return confirm('Delete this report?')">
                                             <?= csrf_field() ?>
                                             <input type="hidden" name="report_id" value="<?= $r['id'] ?>">
-                                            <input type="hidden" name="action" value="dismissed">
-                                            <button type="submit" class="btn btn-outline btn-sm">Dismiss</button>
+                                            <input type="hidden" name="action" value="delete">
+                                            <button type="submit" class="btn btn-danger btn-sm">Delete</button>
                                         </form>
-                                    </div>
-                                <?php else: ?>
-                                    <span class="badge"><?= ucfirst($r['status']) ?></span>
-                                <?php endif; ?>
+                                    <?php endif; ?>
+                                </div>
                             </td>
                         </tr>
                     <?php endforeach; ?>

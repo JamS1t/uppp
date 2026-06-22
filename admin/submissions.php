@@ -17,30 +17,52 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && verify_csrf()) {
     } elseif ($subId > 0 && $action === 'delete') {
         soft_delete($pdo, 'submissions', $subId);
         flash('success', 'Submission deleted.');
+    } elseif ($subId > 0 && $action === 'restore') {
+        restore_row($pdo, 'submissions', $subId);
+        flash('success', 'Submission restored.');
     }
     redirect('submissions.php?status=' . ($_GET['status'] ?? 'pending'));
 }
 
 $statusFilter = $_GET['status'] ?? 'pending';
-if (!in_array($statusFilter, ['pending', 'approved', 'rejected'])) $statusFilter = 'pending';
+if (!in_array($statusFilter, ['pending', 'approved', 'rejected', 'deleted'])) $statusFilter = 'pending';
+$viewingDeleted = $statusFilter === 'deleted';
 
-$pagination = paginate(
-    $pdo,
-    'SELECT COUNT(*) FROM submissions WHERE status = ? AND deleted_at IS NULL',
-    [$statusFilter]
-);
-
-$stmt = $pdo->prepare("
-    SELECT s.*, u.username, c.name AS category_name
-    FROM submissions s
-    JOIN users u ON s.user_id = u.id
-    JOIN categories c ON s.category_id = c.id
-    WHERE s.status = ? AND s.deleted_at IS NULL
-    ORDER BY s.created_at DESC
-    LIMIT {$pagination['limit']} OFFSET {$pagination['offset']}
-");
-$stmt->execute([$statusFilter]);
+if ($viewingDeleted) {
+    $pagination = paginate(
+        $pdo,
+        'SELECT COUNT(*) FROM submissions WHERE deleted_at IS NOT NULL',
+        []
+    );
+    $stmt = $pdo->prepare("
+        SELECT s.*, u.username, c.name AS category_name
+        FROM submissions s
+        JOIN users u ON s.user_id = u.id
+        JOIN categories c ON s.category_id = c.id
+        WHERE s.deleted_at IS NOT NULL
+        ORDER BY s.deleted_at DESC
+        LIMIT {$pagination['limit']} OFFSET {$pagination['offset']}
+    ");
+    $stmt->execute();
+} else {
+    $pagination = paginate(
+        $pdo,
+        'SELECT COUNT(*) FROM submissions WHERE status = ? AND deleted_at IS NULL',
+        [$statusFilter]
+    );
+    $stmt = $pdo->prepare("
+        SELECT s.*, u.username, c.name AS category_name
+        FROM submissions s
+        JOIN users u ON s.user_id = u.id
+        JOIN categories c ON s.category_id = c.id
+        WHERE s.status = ? AND s.deleted_at IS NULL
+        ORDER BY s.created_at DESC
+        LIMIT {$pagination['limit']} OFFSET {$pagination['offset']}
+    ");
+    $stmt->execute([$statusFilter]);
+}
 $submissions = $stmt->fetchAll();
+$deletedSubsCount = deleted_count($pdo, 'submissions');
 
 $pageTitle = 'Manage Submissions';
 require_once '../includes/header.php';
@@ -55,6 +77,7 @@ require_once '../includes/header.php';
             <a href="?status=pending" class="<?= $statusFilter === 'pending' ? 'active' : '' ?>">Pending</a>
             <a href="?status=approved" class="<?= $statusFilter === 'approved' ? 'active' : '' ?>">Approved</a>
             <a href="?status=rejected" class="<?= $statusFilter === 'rejected' ? 'active' : '' ?>">Rejected</a>
+            <a href="?status=deleted" class="<?= $viewingDeleted ? 'active' : '' ?>">Deleted<?= $deletedSubsCount > 0 ? ' (' . $deletedSubsCount . ')' : '' ?></a>
         </div>
 
         <?php if (empty($submissions)): ?>
@@ -79,31 +102,40 @@ require_once '../includes/header.php';
                             <td><a href="<?= sanitize($sub['url']) ?>" target="_blank" rel="noopener"><?= sanitize(get_domain($sub['url'])) ?></a></td>
                             <td><a href="../profile.php?id=<?= $sub['user_id'] ?>"><?= sanitize($sub['username']) ?></a></td>
                             <td><?= sanitize($sub['category_name']) ?></td>
-                            <td><?= time_ago($sub['created_at']) ?></td>
+                            <td><?= $viewingDeleted ? 'deleted ' . time_ago($sub['deleted_at']) : time_ago($sub['created_at']) ?></td>
                             <td>
                                 <div class="admin-actions">
-                                    <?php if ($sub['status'] !== 'approved'): ?>
+                                    <?php if ($viewingDeleted): ?>
                                         <form method="POST" style="display:inline;">
                                             <?= csrf_field() ?>
                                             <input type="hidden" name="submission_id" value="<?= $sub['id'] ?>">
-                                            <input type="hidden" name="action" value="approved">
-                                            <button type="submit" class="btn btn-success btn-sm">Approve</button>
+                                            <input type="hidden" name="action" value="restore">
+                                            <button type="submit" class="btn btn-success btn-sm">Restore</button>
                                         </form>
-                                    <?php endif; ?>
-                                    <?php if ($sub['status'] !== 'rejected'): ?>
-                                        <form method="POST" style="display:inline;">
+                                    <?php else: ?>
+                                        <?php if ($sub['status'] !== 'approved'): ?>
+                                            <form method="POST" style="display:inline;">
+                                                <?= csrf_field() ?>
+                                                <input type="hidden" name="submission_id" value="<?= $sub['id'] ?>">
+                                                <input type="hidden" name="action" value="approved">
+                                                <button type="submit" class="btn btn-success btn-sm">Approve</button>
+                                            </form>
+                                        <?php endif; ?>
+                                        <?php if ($sub['status'] !== 'rejected'): ?>
+                                            <form method="POST" style="display:inline;">
+                                                <?= csrf_field() ?>
+                                                <input type="hidden" name="submission_id" value="<?= $sub['id'] ?>">
+                                                <input type="hidden" name="action" value="rejected">
+                                                <button type="submit" class="btn btn-danger btn-sm">Reject</button>
+                                            </form>
+                                        <?php endif; ?>
+                                        <form method="POST" style="display:inline;" onsubmit="return confirm('Delete this submission?')">
                                             <?= csrf_field() ?>
                                             <input type="hidden" name="submission_id" value="<?= $sub['id'] ?>">
-                                            <input type="hidden" name="action" value="rejected">
-                                            <button type="submit" class="btn btn-danger btn-sm">Reject</button>
+                                            <input type="hidden" name="action" value="delete">
+                                            <button type="submit" class="btn btn-danger btn-sm">Delete</button>
                                         </form>
                                     <?php endif; ?>
-                                    <form method="POST" style="display:inline;" onsubmit="return confirm('Delete this submission?')">
-                                        <?= csrf_field() ?>
-                                        <input type="hidden" name="submission_id" value="<?= $sub['id'] ?>">
-                                        <input type="hidden" name="action" value="delete">
-                                        <button type="submit" class="btn btn-danger btn-sm">Delete</button>
-                                    </form>
                                 </div>
                             </td>
                         </tr>

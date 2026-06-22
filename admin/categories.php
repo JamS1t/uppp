@@ -58,12 +58,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && verify_csrf()) {
         }
         redirect('categories.php');
     }
+
+    if ($action === 'restore') {
+        $restoreId = (int)($_POST['restore_id'] ?? 0);
+        if ($restoreId > 0) {
+            restore_row($pdo, 'categories', $restoreId);
+            flash('success', 'Category restored.');
+        }
+        redirect('categories.php?view=deleted');
+    }
 }
+
+$view = $_GET['view'] ?? 'active';
+if (!in_array($view, ['active', 'deleted'])) $view = 'active';
+$viewingDeleted = $view === 'deleted';
+$catWhere = $viewingDeleted ? 'c.deleted_at IS NOT NULL' : 'c.deleted_at IS NULL';
 
 $categories = $pdo->query("
     SELECT c.*, (SELECT COUNT(*) FROM submissions WHERE category_id = c.id AND deleted_at IS NULL) AS submission_count
-    FROM categories c WHERE c.deleted_at IS NULL ORDER BY c.name
+    FROM categories c WHERE $catWhere ORDER BY c.name
 ")->fetchAll();
+$deletedCatCount = deleted_count($pdo, 'categories');
 
 // Editing?
 $editing = null;
@@ -91,6 +106,12 @@ require_once '../includes/header.php';
             </div>
         <?php endif; ?>
 
+        <div class="filter-tabs">
+            <a href="?view=active" class="<?= !$viewingDeleted ? 'active' : '' ?>">Active</a>
+            <a href="?view=deleted" class="<?= $viewingDeleted ? 'active' : '' ?>">Deleted<?= $deletedCatCount > 0 ? ' (' . $deletedCatCount . ')' : '' ?></a>
+        </div>
+
+        <?php if (!$viewingDeleted): ?>
         <div style="background: var(--color-surface); border-radius: var(--radius); padding: 20px; box-shadow: var(--shadow); margin-bottom: 24px;">
             <h2 style="font-size: 1rem; margin-bottom: 12px;"><?= $editing ? 'Edit Category' : 'Add Category' ?></h2>
             <form method="POST" style="display: flex; gap: 12px; flex-wrap: wrap; align-items: flex-end;">
@@ -117,6 +138,7 @@ require_once '../includes/header.php';
                 <?php endif; ?>
             </form>
         </div>
+        <?php endif; ?>
 
         <table class="admin-table">
             <thead>
@@ -137,13 +159,22 @@ require_once '../includes/header.php';
                         <td><?= $cat['submission_count'] ?></td>
                         <td>
                             <div class="admin-actions">
-                                <a href="?edit=<?= $cat['id'] ?>" class="btn btn-outline btn-sm">Edit</a>
-                                <form method="POST" style="display:inline;" onsubmit="return confirm('Delete this category?')">
-                                    <?= csrf_field() ?>
-                                    <input type="hidden" name="action" value="delete">
-                                    <input type="hidden" name="delete_id" value="<?= $cat['id'] ?>">
-                                    <button type="submit" class="btn btn-danger btn-sm">Delete</button>
-                                </form>
+                                <?php if ($viewingDeleted): ?>
+                                    <form method="POST" style="display:inline;">
+                                        <?= csrf_field() ?>
+                                        <input type="hidden" name="action" value="restore">
+                                        <input type="hidden" name="restore_id" value="<?= $cat['id'] ?>">
+                                        <button type="submit" class="btn btn-success btn-sm">Restore</button>
+                                    </form>
+                                <?php else: ?>
+                                    <a href="?edit=<?= $cat['id'] ?>" class="btn btn-outline btn-sm">Edit</a>
+                                    <form method="POST" style="display:inline;" onsubmit="return confirm('Delete this category?')">
+                                        <?= csrf_field() ?>
+                                        <input type="hidden" name="action" value="delete">
+                                        <input type="hidden" name="delete_id" value="<?= $cat['id'] ?>">
+                                        <button type="submit" class="btn btn-danger btn-sm">Delete</button>
+                                    </form>
+                                <?php endif; ?>
                             </div>
                         </td>
                     </tr>

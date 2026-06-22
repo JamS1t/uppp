@@ -144,6 +144,26 @@ function restore_row(PDO $pdo, string $table, int $id): bool {
     return $stmt->rowCount() > 0;
 }
 
+// Count of soft-deleted rows in a table (for "Deleted" tab badges).
+// $table comes only from the trusted SOFT_DELETE_TABLES whitelist, never input.
+function deleted_count(PDO $pdo, string $table): int {
+    if (!in_array($table, SOFT_DELETE_TABLES, true)) {
+        throw new InvalidArgumentException("Table '$table' is not soft-deletable.");
+    }
+    return (int)$pdo->query("SELECT COUNT(*) FROM `$table` WHERE deleted_at IS NOT NULL")->fetchColumn();
+}
+
+// Initials for an avatar chip (1-2 letters derived from a username, no storage).
+function initials(string $name): string {
+    $name = trim($name);
+    if ($name === '') return '?';
+    $parts = preg_split('/[\s_\-.]+/', $name, -1, PREG_SPLIT_NO_EMPTY);
+    if (count($parts) >= 2) {
+        return strtoupper(mb_substr($parts[0], 0, 1) . mb_substr($parts[1], 0, 1));
+    }
+    return strtoupper(mb_substr($name, 0, 2));
+}
+
 /* ---------------------------------------------------------------------------
  * User warnings
  *
